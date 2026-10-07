@@ -47,14 +47,16 @@ python tools/inspect_ckpt.py checkpoints/bonsai2-27b-mlx --base checkpoints/qwen
 
 ## Steps
 
-- **B0** repo, env, downloads, verify. ◀ now
-- **B1** forensics: per layer type and depth, compare Bonsai's trits with `RTN_ternary(rotate(W_base, signs))`
+- **B0** ✅ repo, env, downloads, verify.
+- **B1** ◀ now — forensics: per layer type and depth, compare Bonsai's trits with `RTN_ternary(rotate(W_base, signs))`
   — flip rate, zero share, scale ratio (absmean vs TWN 0.7·mean|w| vs learned). Low flip rate: mostly PTQ;
   high: long QAT. **Caveat:** GDN value-head order may differ between the pack (grouped) and the HF base.
   Rows of `in_proj_qkv` (V part) / `in_proj_z`, and the *input columns* of `out_proj` (permute before
   rotating). Test both orders on one layer; the right one has the far lower flip rate.
 - **B2** dense-dequant export: `fold` every packed module back to the HF layout, so stock vLLM + lm-eval score it.
 - **B3** baselines on the inner suite: Qwen3.8-27B bf16 and the dequantised Bonsai 2.
-- **B4** Phase-1 model: Qwen3.8 has no small sibling on HF (27B, Flash-Next, 2.4T-A95B only). Need a small
-  Gated-DeltaNet hybrid with the same layer layout; PrismML's v1 packs `Ternary-Bonsai-{1.7B,4B,8B}-unpacked`
-  are small references, but v1 is unrotated.
+- **B4** Phase-1 models: **Qwen3.5-2B** for iteration (same `Qwen3_5ForConditionalGeneration` layout as
+  Qwen3.8-27B: 18 GDN + 6 full-attention layers, 2048 / 6144 both multiples of 1024, 16 v / 16 k heads, tied
+  embeddings) and **Qwen3.5-9B** as the scaling point (32 v / 16 k heads = the grouped-GDN case). Qwen3.8 itself
+  has no small sibling on HF.
+- **B5–B11** quantizer (`tbr/quant.py`), data + teacher, the R0–R7 ladder, 27B, pack + verify, write-up.
