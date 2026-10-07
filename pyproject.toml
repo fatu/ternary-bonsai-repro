@@ -1,0 +1,20 @@
+[project]
+name = "ternary-bonsai-repro"
+version = "0.1.0"
+description = "Reproducing Ternary Bonsai 2 27B: format forensics, dense-dequant eval, recovery-recipe ablations"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "safetensors", "huggingface_hub>=0.34"]
+
+[project.optional-dependencies]
+eval = ["transformers", "accelerate", "lm-eval"]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["tbr"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
