@@ -1,7 +1,6 @@
 """verify_download.py + inspect_ckpt.py on a tiny fake pack and base (same names, dtypes, layout)."""
 import hashlib
 import json
-import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -9,25 +8,10 @@ from pathlib import Path
 import numpy as np
 
 from tbr.pack import pack_codes
+from tbr.st import write_safetensors
 
 ROOT = Path(__file__).resolve().parents[1]
 rng = np.random.default_rng(1)
-_DT = {np.dtype(np.uint32): "U32", np.dtype(np.float16): "F16", np.dtype(np.float32): "F32"}
-
-
-def write_st(path, tensors, bf16=()):
-    header, blobs, off = {}, [], 0
-    for name, a in tensors.items():
-        raw = a.tobytes()
-        header[name] = {"dtype": "BF16" if name in bf16 else _DT[a.dtype], "shape": list(a.shape),
-                        "data_offsets": [off, off + len(raw)]}
-        blobs.append(raw)
-        off += len(raw)
-    h = json.dumps(header).encode()
-    h += b" " * (-len(h) % 8)
-    Path(path).write_bytes(struct.pack("<Q", len(h)) + h + b"".join(blobs))
-
-
 def make_fixture(tmp):
     hid, ff = 256, 512
     signs = {w: rng.choice([-1.0, 1.0], size=w).astype(np.float16) for w in (hid, ff)}
@@ -44,7 +28,7 @@ def make_fixture(tmp):
 
     pd, bd = tmp / "pack", tmp / "base"
     pd.mkdir(); bd.mkdir()
-    write_st(pd / "model.safetensors", pack)
+    write_safetensors(pd / "model.safetensors", pack)
     vals = np.concatenate([signs[hid], signs[ff]]).astype(float).tolist()
     (pd / "hadamard.json").write_text(json.dumps({"prism.hadamard.sign_widths": [hid, ff], "prism.hadamard.sign_values": vals}))
     files = {n: {"size": (pd / n).stat().st_size, "sha256": hashlib.sha256((pd / n).read_bytes()).hexdigest()}
@@ -54,7 +38,7 @@ def make_fixture(tmp):
     names = sorted(base)
     shards = {"model-00001-of-00002.safetensors": names[:2], "model-00002-of-00002.safetensors": names[2:]}
     for f, ns in shards.items():
-        write_st(bd / f, {n: base[n] for n in ns}, bf16=set(ns))
+        write_safetensors(bd / f, {n: base[n] for n in ns}, bf16=set(ns))
     total = sum(base[n].nbytes for n in names)
     (bd / "model.safetensors.index.json").write_text(json.dumps(
         {"metadata": {"total_size": total}, "weight_map": {n: f for f, ns in shards.items() for n in ns}}))

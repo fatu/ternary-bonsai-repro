@@ -41,10 +41,13 @@ class SafeTensors:
     def info(self, name) -> dict:
         return self.header[name]
 
-    def get(self, name, float32: bool = False) -> np.ndarray:
+    def get(self, name, float32: bool = False, rows=None) -> np.ndarray:
+        """Whole tensor, or `rows` (a slice or an index array) of it — only those bytes are touched."""
         h = self.header[name]
         a, b = h["data_offsets"]
         arr = self._mm[self._base + a:self._base + b].view(_NP[h["dtype"]]).reshape(h["shape"])
+        if rows is not None:
+            arr = arr[rows]
         if h["dtype"] == "BF16":
             return (arr.astype(np.uint32) << 16).view(np.float32)
         return arr.astype(np.float32) if float32 else arr
@@ -66,5 +69,34 @@ class Checkpoint:
     def info(self, name) -> dict:
         return self.where[name].info(name)
 
-    def get(self, name, float32: bool = False) -> np.ndarray:
-        return self.where[name].get(name, float32)
+    def get(self, name, float32: bool = False, rows=None) -> np.ndarray:
+        return self.where[name].get(name, float32, rows)
+
+
+_ST = {np.dtype(np.uint8): "U8", np.dtype(np.uint16): "U16", np.dtype(np.uint32): "U32", np.dtype(np.int8): "I8",
+       np.dtype(np.float16): "F16", np.dtype(np.float32): "F32"}
+
+
+def bf16_bits(x: np.ndarray) -> np.ndarray:
+    """float32 -> bf16 bit pattern (uint16, truncation), what a BF16 safetensors tensor stores."""
+    return (np.ascontiguousarray(x, dtype=np.float32).view(np.uint32) >> 16).astype(np.uint16)
+
+
+def write_safetensors(path, tensors: dict, bf16=(), metadata=None):
+    """Write one safetensors file. Arrays named in `bf16` must be uint16 bit patterns (see bf16_bits)."""
+    header, blobs, off = {}, [], 0
+    for name, a in tensors.items():
+        a = np.ascontiguousarray(a)
+        raw = a.tobytes()
+        header[name] = {"dtype": "BF16" if name in bf16 else _ST[a.dtype], "shape": list(a.shape),
+                        "data_offsets": [off, off + len(raw)]}
+        blobs.append(raw)
+        off += len(raw)
+    if metadata:
+        header["__metadata__"] = metadata
+    h = json.dumps(header).encode()
+    h += b" " * (-len(h) % 8)
+    with open(path, "wb") as f:
+        f.write(struct.pack("<Q", len(h)) + h)
+        for b in blobs:
+            f.write(b)

@@ -31,6 +31,8 @@ tbr/st.py          safetensors header + memmap reader (no torch / MLX; handles U
 tbr/pack.py        unpack, dequant, trits, fwht, fold / rotate, load_signs, canon (shared tensor names)
 tools/verify_download.py   B0: both checkpoints complete (sizes, sha256, truncation, param counts)
 tools/inspect_ckpt.py      B1 step 1: tensor patterns, sign vectors, code shares, shape match vs base
+tools/forensics.py         S1: flip rate / zero share / scale rule / reconstruction error vs the base, GDN order test
+tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE) + the GDN value-head permutation
 scripts/setup_env.sh       uv venv + vLLM + this package + eval, GPU listing, tests
 scripts/download.sh        both checkpoints (~64 GB, resumable) + verify
 tests/                     format tests (MLX cross-checks skip on Linux) + tool tests on a fake pack
@@ -43,16 +45,17 @@ bash scripts/setup_env.sh                                    # 📷 the torch / 
 CKPT_DIR=/path/with/70GB bash scripts/download.sh            # 📷 the two ✓ lines
 source .venv/bin/activate
 python tools/inspect_ckpt.py checkpoints/bonsai2-27b-mlx --base checkpoints/qwen3.8-27b   # 📷 all four sections
+python tools/forensics.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b               # S1, ~3 min · 📷 tables C, A, B
+python tools/forensics.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b --all         # every layer, ~5 min
 ```
 
 ## Steps
 
 - **B0** ✅ repo, env, downloads, verify.
-- **B1** ◀ now — forensics: per layer type and depth, compare Bonsai's trits with `RTN_ternary(rotate(W_base, signs))`
-  — flip rate, zero share, scale ratio (absmean vs TWN 0.7·mean|w| vs learned). Low flip rate: mostly PTQ;
-  high: long QAT. **Caveat:** GDN value-head order may differ between the pack (grouped) and the HF base.
-  Rows of `in_proj_qkv` (V part) / `in_proj_z`, and the *input columns* of `out_proj` (permute before
-  rotating). Test both orders on one layer; the right one has the far lower flip rate.
+- **B1** ◀ now — `tools/forensics.py`: per layer type and depth, Bonsai's trits vs `RTN_ternary(rotate(W_base, signs))`
+  under absmean / TWN / MSE scales — flip rate, zero share, sign agreement, `s_b/s*`, reconstruction error of the
+  base (Bonsai's vs the best RTN). Low flip rate → mostly PTQ; high → long QAT. The GDN value-head order
+  (pack stores them grouped) is tested automatically: none / vperm / inverse on four layers, lowest flip wins.
 - **B2** dense-dequant export: `fold` every packed module back to the HF layout, so stock vLLM + lm-eval score it.
 - **B3** baselines on the inner suite: Qwen3.8-27B bf16 and the dequantised Bonsai 2.
 - **B4** Phase-1 models: **Qwen3.5-2B** for iteration (same `Qwen3_5ForConditionalGeneration` layout as
