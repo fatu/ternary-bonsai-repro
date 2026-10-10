@@ -32,6 +32,8 @@ tbr/pack.py        unpack, dequant, trits, fwht, fold / rotate, load_signs, cano
 tools/verify_download.py   B0: both checkpoints complete (sizes, sha256, truncation, param counts)
 tools/inspect_ckpt.py      B1 step 1: tensor patterns, sign vectors, code shares, shape match vs base
 tools/forensics.py         S1: flip rate / zero share / scale rule / reconstruction error vs the base, GDN order test
+tools/export_dense.py      S2: the pack as a dense bf16 checkpoint in the base layout (+ were the FP tensors retrained?)
+tools/ppl.py               WikiText-2 perplexity (32 × 2,048 seeded windows) + one greedy generation, via vLLM
 tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE) + the GDN value-head permutation
 scripts/setup_env.sh       uv venv + vLLM + this package + eval, GPU listing, tests
 scripts/download.sh        both checkpoints (~64 GB, resumable) + verify
@@ -47,6 +49,11 @@ source .venv/bin/activate
 python tools/inspect_ckpt.py checkpoints/bonsai2-27b-mlx --base checkpoints/qwen3.8-27b   # 📷 all four sections
 python tools/forensics.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b               # S1, ~3 min · 📷 tables C, A, B
 python tools/forensics.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b --all         # every layer, ~5 min
+# S2 (uses the head order forensics chose)
+python tools/export_dense.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b checkpoints/bonsai2-27b-dense   # ~55 GB · 📷 report
+python tools/verify_download.py checkpoints/bonsai2-27b-dense
+python tools/ppl.py checkpoints/qwen3.8-27b          # 📷  bf16 base
+python tools/ppl.py checkpoints/bonsai2-27b-dense    # 📷  dense Bonsai — within ~20 % of the base, sane generation
 ```
 
 ## Steps
@@ -56,7 +63,8 @@ python tools/forensics.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b --
   under absmean / TWN / MSE scales — flip rate, zero share, sign agreement, `s_b/s*`, reconstruction error of the
   base (Bonsai's vs the best RTN). Low flip rate → mostly PTQ; high → long QAT. The GDN value-head order
   (pack stores them grouped) is tested automatically: none / vperm / inverse on four layers, lowest flip wins.
-- **B2** dense-dequant export: `fold` every packed module back to the HF layout, so stock vLLM + lm-eval score it.
+- **B2** `tools/export_dense.py` + `tools/ppl.py` — tested bit-exact on synthetic packs under every head order; the
+  vLLM part of `ppl.py` runs only on the box.
 - **B3** baselines on the inner suite: Qwen3.8-27B bf16 and the dequantised Bonsai 2.
 - **B4** Phase-1 models: **Qwen3.5-2B** for iteration (same `Qwen3_5ForConditionalGeneration` layout as
   Qwen3.8-27B: 18 GDN + 6 full-attention layers, 2048 / 6144 both multiples of 1024, 16 v / 16 k heads, tied

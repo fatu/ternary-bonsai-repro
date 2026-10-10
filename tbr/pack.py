@@ -108,3 +108,17 @@ def canon(name: str) -> str | None:
 
 def layer_pattern(key: str) -> str:
     return re.sub(r"layers\.\d+\.", "layers.N.", key)
+
+
+def gdn_role(key: str):
+    """How a GDN tensor (canonical key, see `canon`) is laid out over the value heads, or None:
+    'rows_v'    V block of the first axis, unit head_v_dim, after the q/k block   (in_proj_qkv, conv1d)
+    'rows'      whole first axis, unit head_v_dim                                   (in_proj_z)
+    'rows_head' whole first axis, one entry per value head                          (in_proj_a/b, A_log, dt_bias)
+    'cols'      input columns, unit head_v_dim                                      (out_proj)"""
+    gdn = {"in_proj_qkv.weight": "rows_v", "conv1d.weight": "rows_v", "in_proj_z.weight": "rows",
+           "in_proj_a.weight": "rows_head", "in_proj_b.weight": "rows_head", "A_log": "rows_head",
+           "dt_bias": "rows_head", "out_proj.weight": "cols"}
+    if ".linear_attn." not in key:
+        return None
+    return gdn.get(key.split(".linear_attn.", 1)[1])

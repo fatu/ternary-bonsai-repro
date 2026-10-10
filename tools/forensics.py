@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tbr.pack import GROUP, canon, layer_pattern, load_signs, rotate, trits as pack_trits  # noqa: E402
+from tbr.pack import GROUP, canon, gdn_role, layer_pattern, load_signs, rotate, trits as pack_trits  # noqa: E402
 from tbr.st import Checkpoint  # noqa: E402
 from tbr.ternary import RULES, inverse, rtn, vperm  # noqa: E402
 
@@ -66,17 +66,6 @@ def _state():
                   hd=int(tc["linear_value_head_dim"]), hk=int(tc["linear_key_head_dim"]),
                   n_layers=int(tc.get("num_hidden_layers", 0)))
     return _G
-
-
-def gdn_role(key: str):
-    """Which axis of this module carries the value heads: V rows of qkv, rows of z, input columns of out_proj."""
-    if key.endswith("linear_attn.in_proj_qkv.weight"):
-        return "rows_v"
-    if key.endswith("linear_attn.in_proj_z.weight"):
-        return "rows"
-    if key.endswith("linear_attn.out_proj.weight"):
-        return "cols"
-    return None
 
 
 def _sub(x):
@@ -221,7 +210,7 @@ def main():
         regroup = a.regroup
         if regroup == "auto" and G["nv"] != G["nk"]:
             lin = sorted({layer_of(k) for k in chosen.values() if gdn_role(k)}, key=lambda x: x)[:4]
-            gdn = [(m, k) for m, k in chosen.items() if gdn_role(k) and layer_of(k) in lin]
+            gdn = [(m, k) for m, k in chosen.items() if gdn_role(k) in ('rows_v', 'rows', 'cols') and layer_of(k) in lin]
             futs = {(v, m): ex.submit(analyze, m, k, v, True) for v in ("none", "vperm", "inverse") for m, k in gdn}
             print(f"\n== C. GDN value-head order (layers {lin}; flip% under the best-fitting rule; V rows / rows / input columns)")
             print("  order      in_proj_qkv[V]   in_proj_z   out_proj   mean")
