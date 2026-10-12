@@ -5,7 +5,7 @@
     python tools/ppl.py checkpoints/bonsai2-27b-dense
 
 Fixed protocol: WikiText-2 raw test split joined with blank lines, tokenized once, 32 windows of 2,048 tokens
-at seeded non-overlapping offsets (seed 0) — every model is scored on the same 65,504 predicted tokens.
+at seeded non-overlapping offsets (seed 0) — every model is scored on the same 65,536 predicted tokens.
 Perplexity = exp(mean NLL over tokens) from vLLM prompt logprobs. A wrong fold or head order shows up as a
 perplexity in the hundreds or thousands; dense Bonsai should land within ~20 % of the base.
 """

@@ -1,0 +1,21 @@
+# MATH-500 (HuggingFaceH4/MATH-500: the 500-problem subset of MATH used by PRM800K / Qwen / Bonsai's "Math" row),
+# zero-shot chat, boxed answer, graded by math_verify (symbolic equivalence, not string match).
+# lm-eval has no built-in MATH-500 task; loaded with `--include_path tools/lm_tasks`.
+task: math500
+dataset_path: HuggingFaceH4/MATH-500
+test_split: test
+output_type: generate_until
+doc_to_text: "{{problem}}\n\nPlease reason step by step, and put your final answer within \\boxed{}."
+doc_to_target: "{{answer}}"
+process_results: !function math500_utils.process_results
+generation_kwargs:
+  until: []
+  do_sample: false
+  temperature: 0.0
+  max_gen_toks: 2048
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

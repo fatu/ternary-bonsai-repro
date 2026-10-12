@@ -34,6 +34,10 @@ tools/inspect_ckpt.py      B1 step 1: tensor patterns, sign vectors, code shares
 tools/forensics.py         S1: flip rate / zero share / scale rule / reconstruction error vs the base, GDN order test
 tools/export_dense.py      S2: the pack as a dense bf16 checkpoint in the base layout (+ were the FP tensors retrained?)
 tools/ppl.py               WikiText-2 perplexity (32 × 2,048 seeded windows) + one greedy generation, via vLLM
+tools/eval_suite.sh        S3: the inner task suite for one model (vLLM server + lm-eval + EvalPlus), thinking off
+tools/suite_summary.py     S3: one table row from a suite run (+ ratios to the base, Table-8 groups)
+tools/lm_tasks/            lm-eval task configs the harness lacks (math500: boxed answer, math_verify grading)
+tools/kl.py  tbr/kl.py     S3: KL(base ‖ model) on 1 M reference tokens, two models side by side in transformers
 tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE) + the GDN value-head permutation
 scripts/setup_env.sh       uv venv + vLLM + this package + eval, GPU listing, tests
 scripts/download.sh        both checkpoints (~64 GB, resumable) + verify
@@ -54,7 +58,18 @@ python tools/export_dense.py checkpoints/bonsai2-27b-mlx checkpoints/qwen3.8-27b
 python tools/verify_download.py checkpoints/bonsai2-27b-dense
 python tools/ppl.py checkpoints/qwen3.8-27b          # 📷  bf16 base
 python tools/ppl.py checkpoints/bonsai2-27b-dense    # 📷  dense Bonsai — within ~20 % of the base, sane generation
+# S3 — task suite + KL (one-time: uv pip install -e ".[eval]"; GPQA is gated: accept its terms + huggingface-cli login)
+bash tools/eval_suite.sh checkpoints/qwen3.8-27b base                        # ~15 min · 📷 the summary row
+VS=runs/suite/base bash tools/eval_suite.sh checkpoints/bonsai2-27b-dense bonsai   # 📷 both rows + the ratio line
+python tools/kl.py checkpoints/qwen3.8-27b checkpoints/bonsai2-27b-dense    # ~20 min · 📷 the KL line
 ```
+
+The suite is greedy, chat-templated, thinking **off** (`THINK=true GEN=16384 MAXLEN=32768` for the final 27B run):
+GSM8K 8-shot CoT · MATH-500 (boxed, `math_verify`) · HumanEval+ (EvalPlus) · IFEval (prompt-level strict) ·
+GPQA-Diamond CoT zero-shot · MMLU-Pro 5-shot CoT, 8 per category (112 q). Table-8 groups: Math = GSM8K + MATH-500,
+Coding = HumanEval+, Knowledge = GPQA-D + MMLU-Pro, IF = IFEval. The KL is forward KL(base ‖ model) per token on 245
+windows × 4,096 tokens of FineWeb-Edu (cached in `runs/kl/`, so every later row is scored on the same positions) plus
+top-1 agreement and both perplexities on that text.
 
 ## Steps
 
@@ -65,7 +80,8 @@ python tools/ppl.py checkpoints/bonsai2-27b-dense    # 📷  dense Bonsai — wi
   (pack stores them grouped) is tested automatically: none / vperm / inverse on four layers, lowest flip wins.
 - **B2** `tools/export_dense.py` + `tools/ppl.py` — tested bit-exact on synthetic packs under every head order; the
   vLLM part of `ppl.py` runs only on the box.
-- **B3** baselines on the inner suite: Qwen3.8-27B bf16 and the dequantised Bonsai 2.
+- **B3** baselines on the inner suite: Qwen3.8-27B bf16 and the dequantised Bonsai 2 — WikiText-2 PPL done
+  (7.169 → 9.740); `tools/eval_suite.sh` + `tools/kl.py` give the task rows and the KL target.
 - **B4** Phase-1 models: **Qwen3.5-2B** for iteration (same `Qwen3_5ForConditionalGeneration` layout as
   Qwen3.8-27B: 18 GDN + 6 full-attention layers, 2048 / 6144 both multiples of 1024, 16 v / 16 k heads, tied
   embeddings) and **Qwen3.5-9B** as the scaling point (32 v / 16 k heads = the grouped-GDN case). Qwen3.8 itself
