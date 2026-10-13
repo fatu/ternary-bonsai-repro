@@ -18,6 +18,7 @@ def rtn(w: np.ndarray, rule: str = "mse", group: int = GROUP):
     absmean  s = mean|w|,            t = clip(round(w / s), -1, 1)          (BitNet b1.58, per group)
     twn      Δ = 0.7·mean|w|,        t = sign(w)·[|w| > Δ], s = mean|w| over the support  (Li & Liu 2016)
     mse      Δ ∈ MSE_GRID·mean|w| minimising the group's squared error, s = mean|w| over the support
+    bonsai   Δ = 0.5·mean|w| (absmean's support) with the support-mean scale — the pack's quantizer (S1 verdict)
     Returns trits int8 [rows, in] and scales float32 [rows, in/group].
     """
     rows = w.shape[0]
@@ -27,9 +28,11 @@ def rtn(w: np.ndarray, rule: str = "mse", group: int = GROUP):
     if rule == "absmean":
         s = m
         t = np.clip(np.round(g / np.maximum(s, 1e-12)), -1, 1)
-    elif rule in ("twn", "mse"):
+    elif rule in ("twn", "mse", "bonsai"):
         if rule == "twn":
             d = 0.7 * m
+        elif rule == "bonsai":
+            d = 0.5 * m
         else:
             best = d = None
             for f in MSE_GRID:

@@ -38,7 +38,9 @@ tools/eval_suite.sh        S3: the inner task suite for one model (vLLM server +
 tools/suite_summary.py     S3: one table row from a suite run (+ ratios to the base, Table-8 groups)
 tools/lm_tasks/            lm-eval task configs the harness lacks (math500: boxed answer, math_verify grading)
 tools/kl.py  tbr/kl.py     S3: KL(base ‖ model) on 1 M reference tokens, two models side by side in transformers
-tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE) + the GDN value-head permutation
+tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE · bonsai) + the GDN value-head permutation
+tbr/quant.py               S4: TernaryLinear / TernaryEmbedding (latent bf16 weight, STE, rotation), convert · materialize · export_pack
+tools/ptq.py               training-free ladder rows R0 / R1 / R2: convert → materialize → dense bf16 checkpoint for S3
 scripts/setup_env.sh       uv venv + vLLM + this package + eval, GPU listing, tests
 scripts/download.sh        both checkpoints (~64 GB, resumable) + verify
 tests/                     format tests (MLX cross-checks skip on Linux) + tool tests on a fake pack
@@ -71,6 +73,25 @@ Coding = HumanEval+, Knowledge = GPQA-D + MMLU-Pro, IF = IFEval. The KL is forwa
 windows × 4,096 tokens of FineWeb-Edu (cached in `runs/kl/`, so every later row is scored on the same positions) plus
 top-1 agreement and both perplexities on that text.
 
+## The quantizer (S4) and the first ladder rows
+
+`tbr/quant.py` replaces each covered `nn.Linear` / `nn.Embedding` with a module that keeps the model's own bf16 weight as
+the latent parameter and computes `w_eff = fold(STE(Q(rotate(W, signs))), signs)` every forward — Q = round-to-nearest
+ternary per 128 inputs in the rotated basis, rule `bonsai` (support `|w| > 0.5·mean|w|`, support-mean scale, f16-rounded:
+what S1 found in the pack), STE straight through. The model's forward is untouched, so HF / FSDP2 / `save_pretrained`
+work as-is; `materialize()` turns it back into stock modules holding `w_eff` (the dense checkpoint vLLM scores);
+`export_pack()` writes our trits in the pack's layout so `forensics.py` can compare them with Bonsai's. Coverage `v2` =
+Bonsai's list (keeps `in_proj_a/b`, conv1d, `A_log`, `dt_bias`, norms in FP), `v1` also ternarizes `in_proj_a/b`.
+
+```bash
+# Phase 1 on Qwen3.5-2B (one card). Base rows first, then the training-free rungs:
+bash tools/eval_suite.sh checkpoints/qwen3.5-2b base2b && python tools/ppl.py checkpoints/qwen3.5-2b
+python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r0 --no-rotate --coverage v1    # R0  RTN, no rotation, all ternary
+python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r1 --coverage v1                # R1  + Hadamard (seeded signs)
+python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r2                              # R2  + Bonsai's FP list
+for r in r0 r1 r2; do VS=runs/suite/base2b bash tools/eval_suite.sh runs/ladder/$r $r; python tools/kl.py checkpoints/qwen3.5-2b runs/ladder/$r; done
+```
+
 ## Steps
 
 - **B0** ✅ repo, env, downloads, verify.
@@ -86,4 +107,6 @@ top-1 agreement and both perplexities on that text.
   Qwen3.8-27B: 18 GDN + 6 full-attention layers, 2048 / 6144 both multiples of 1024, 16 v / 16 k heads, tied
   embeddings) and **Qwen3.5-9B** as the scaling point (32 v / 16 k heads = the grouped-GDN case). Qwen3.8 itself
   has no small sibling on HF.
-- **B5–B11** quantizer (`tbr/quant.py`), data + teacher, the R0–R7 ladder, 27B, pack + verify, write-up.
+- **B5** ✅ quantizer `tbr/quant.py` + `tools/ptq.py` (tested bit-exact against the numpy reference; CLI output ==
+  in-memory convert on a tiny Qwen2).
+- **B6–B11** data + teacher, the R0–R7 ladder (R0–R2 need no training: `tools/ptq.py`), 27B, pack + verify, write-up.
