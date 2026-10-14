@@ -110,7 +110,8 @@ class Toy(nn.Module):
         self.lm_head = nn.Linear(H, V, bias=False)
         self.lm_head.weight = lm.embed_tokens.weight                        # tied
 
-    def forward(self, ids):
+    def forward(self, ids=None, input_ids=None, **kw):                 # HF-style call: model(input_ids=…, use_cache=False)
+        ids = ids if ids is not None else input_ids
         lm = self.model.language_model
         h = lm.embed_tokens(ids)
         la = lm.layers[0].linear_attn

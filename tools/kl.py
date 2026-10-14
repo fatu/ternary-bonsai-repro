@@ -23,27 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tbr.evalutil import perplexity  # noqa: E402
-from tbr.kl import kl_stats, windows_from_stream  # noqa: E402
-
-DATASET, CONFIG = "HuggingFaceFW/fineweb-edu", "sample-10BT"
-
-
-def reference_tokens(tok, seq_len: int, n_windows: int, cache_dir: Path) -> np.ndarray:
-    f = cache_dir / f"tokens_fineweb-edu_{seq_len}x{n_windows}.npy"
-    if f.exists():
-        return np.load(f)
-    from datasets import load_dataset
-
-    ds = load_dataset(DATASET, name=CONFIG, split="train", streaming=True)
-    sep = [tok.eos_token_id] if tok.eos_token_id is not None else tok.encode("\n\n", add_special_tokens=False)
-    w = windows_from_stream((d["text"] for d in ds), lambda t: tok.encode(t, add_special_tokens=False),
-                            seq_len, n_windows, sep)
-    arr = np.asarray(w, dtype=np.int64)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    np.save(f, arr)
-    print(f"cached {arr.shape[0]} × {arr.shape[1]} reference tokens → {f}")
-    return arr
-
+from tbr.kl import fineweb_windows, kl_stats  # noqa: E402
 
 def load_model(path: str, gpus: list[int]):
     import torch
@@ -81,7 +61,7 @@ def main():
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(a.base)
-    windows = reference_tokens(tok, a.seq_len, a.n_windows, Path(a.out_dir))
+    windows = fineweb_windows(tok, a.seq_len, a.n_windows, a.out_dir)
     g_base, g_model = ([int(x) for x in s.split(",")] for s in a.gpus.split(":"))
     base, model = load_model(a.base, g_base), load_model(a.model, g_model)
     print(f"loaded both models · {time.time() - t0:.0f} s")

@@ -31,15 +31,42 @@ def kl_stats(logits_p, logits_q, targets, chunk: int = 512) -> dict:
     return {"kl": kl, "nll_p": nll_p, "nll_q": nll_q, "top1": top1, "n": T}
 
 
-def windows_from_stream(docs, tokenize, seq_len: int, n_windows: int, sep: list[int]) -> list[list[int]]:
-    """The first n_windows windows of seq_len + 1 tokens from a deterministic document stream, documents joined
-    by `sep` — the same tokens for every model scored later (tools/kl.py caches them)."""
-    need, ids = (seq_len + 1) * n_windows, []
+def windows_from_stream(docs, tokenize, seq_len: int, n_windows: int, sep: list[int], skip: int = 0) -> list[list[int]]:
+    """Windows `skip` … `skip + n_windows` of seq_len + 1 tokens from a deterministic document stream, documents joined
+    by `sep` — the same tokens for every model scored later (tools/kl.py caches them). `skip` keeps calibration
+    windows (tools/ptq.py --method gptq) disjoint from the KL reference windows."""
+    need, ids = (seq_len + 1) * (n_windows + skip), []
     for d in docs:
         ids.extend(tokenize(d))
         ids.extend(sep)
         if len(ids) >= need:
             break
     if len(ids) < need:
-        raise ValueError(f"stream too short: {len(ids)} tokens for {n_windows} windows of {seq_len + 1}")
-    return [ids[i * (seq_len + 1):(i + 1) * (seq_len + 1)] for i in range(n_windows)]
+        raise ValueError(f"stream too short: {len(ids)} tokens for {n_windows + skip} windows of {seq_len + 1}")
+    return [ids[i * (seq_len + 1):(i + 1) * (seq_len + 1)] for i in range(skip, skip + n_windows)]
+
+
+DATASET, CONFIG = "HuggingFaceFW/fineweb-edu", "sample-10BT"
+
+
+def fineweb_windows(tok, seq_len: int, n_windows: int, cache_dir, skip: int = 0):
+    """Cached int64 array [n_windows, seq_len + 1] of FineWeb-Edu (sample-10BT, streamed in file order, EOS-joined)."""
+    from pathlib import Path
+
+    import numpy as np
+
+    cache_dir = Path(cache_dir)
+    f = cache_dir / f"tokens_fineweb-edu_{seq_len}x{n_windows}{'_skip' + str(skip) if skip else ''}.npy"
+    if f.exists():
+        return np.load(f)
+    from datasets import load_dataset
+
+    ds = load_dataset(DATASET, name=CONFIG, split="train", streaming=True)
+    sep = [tok.eos_token_id] if tok.eos_token_id is not None else tok.encode("\n\n", add_special_tokens=False)
+    w = windows_from_stream((d["text"] for d in ds), lambda t: tok.encode(t, add_special_tokens=False),
+                            seq_len, n_windows, sep, skip)
+    arr = np.asarray(w, dtype=np.int64)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    np.save(f, arr)
+    print(f"cached {arr.shape[0]} × {arr.shape[1]} FineWeb-Edu tokens → {f}")
+    return arr

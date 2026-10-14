@@ -40,7 +40,8 @@ tools/lm_tasks/            lm-eval task configs the harness lacks (math500: boxe
 tools/kl.py  tbr/kl.py     S3: KL(base ‖ model) on 1 M reference tokens, two models side by side in transformers
 tbr/ternary.py             reference ternary rounding (absmean · TWN · MSE · bonsai) + the GDN value-head permutation
 tbr/quant.py               S4: TernaryLinear / TernaryEmbedding (latent bf16 weight, STE, rotation), convert · materialize · export_pack
-tools/ptq.py               training-free ladder rows R0 / R1 / R2: convert → materialize → dense bf16 checkpoint for S3
+tools/ptq.py               training-free ladder rows R0 / R1 / R2 (--method rtn) and R3 (--method gptq) → dense bf16 for S3
+tbr/gptq.py                R3: Hessian-aware (GPTQ) ternary in the rotated basis — OBS error feedback, group scales by the rule
 scripts/setup_env.sh       uv venv + vLLM + this package + eval, GPU listing, tests
 scripts/download.sh        both checkpoints (~64 GB, resumable) + verify
 tests/                     format tests (MLX cross-checks skip on Linux) + tool tests on a fake pack
@@ -90,8 +91,17 @@ bash tools/eval_suite.sh checkpoints/qwen3.5-2b base2b && python tools/ppl.py ch
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r0 --no-rotate --coverage v1    # R0  RTN, no rotation, all ternary
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r1 --coverage v1                # R1  + Hadamard (seeded signs)
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r2                              # R2  + Bonsai's FP list
-for r in r0 r1 r2; do VS=runs/suite/base2b bash tools/eval_suite.sh runs/ladder/$r $r; $KL runs/ladder/$r; done
+python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r3 --method gptq --device cuda  # R3  + Hessian-aware rounding (~10 min)
+for r in r0 r1 r2 r3; do VS=runs/suite/base2b bash tools/eval_suite.sh runs/ladder/$r $r; $KL runs/ladder/$r; done
 ```
+
+R3 (`tbr/gptq.py`): inputs are rotated the way the runtime rotates them, `H = 2/n Σ x_rot x_rotᵀ` per Linear from one pass of
+the full-precision model over 128 × 2,048 FineWeb-Edu tokens (the windows *after* the KL reference, cached in `runs/kl/`),
+then GPTQ's column loop with OBS error feedback; each group's scale is set by the rule when its first column is reached and
+columns round to the nearest level of {−s, 0, s}. The result is a plain ternary pack (rules `bonsai` / `twn` re-quantize
+to the same trits, so the modules, `materialize` and `export_pack` are unchanged). Non-sequential (Hessians from the FP
+model), no act-order — both are R3 variants. Embeddings stay RTN. Hessians live on the GPU: fine for the 2B, the 27B needs
+the per-layer version (S9).
 
 ## Steps
 
