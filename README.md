@@ -84,12 +84,13 @@ work as-is; `materialize()` turns it back into stock modules holding `w_eff` (th
 Bonsai's list (keeps `in_proj_a/b`, conv1d, `A_log`, `dt_bias`, norms in FP), `v1` also ternarizes `in_proj_a/b`.
 
 ```bash
-# Phase 1 on Qwen3.5-2B (one card). Base rows first, then the training-free rungs:
-bash tools/eval_suite.sh checkpoints/qwen3.5-2b base2b && python tools/ppl.py checkpoints/qwen3.5-2b
+# Phase 1 on Qwen3.5-2B — one card (export CUDA_VISIBLE_DEVICES=<free card>). Base rows first, then the training-free rungs:
+export TP=1; KL="python tools/kl.py --gpus 0:0 checkpoints/qwen3.5-2b"
+bash tools/eval_suite.sh checkpoints/qwen3.5-2b base2b && python tools/ppl.py checkpoints/qwen3.5-2b --tp 1
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r0 --no-rotate --coverage v1    # R0  RTN, no rotation, all ternary
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r1 --coverage v1                # R1  + Hadamard (seeded signs)
 python tools/ptq.py checkpoints/qwen3.5-2b runs/ladder/r2                              # R2  + Bonsai's FP list
-for r in r0 r1 r2; do VS=runs/suite/base2b bash tools/eval_suite.sh runs/ladder/$r $r; python tools/kl.py checkpoints/qwen3.5-2b runs/ladder/$r; done
+for r in r0 r1 r2; do VS=runs/suite/base2b bash tools/eval_suite.sh runs/ladder/$r $r; $KL runs/ladder/$r; done
 ```
 
 ## Steps
